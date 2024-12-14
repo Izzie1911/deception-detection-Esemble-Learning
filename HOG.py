@@ -4,7 +4,7 @@ from skimage.feature import hog
 from skimage import exposure
 
 # 1. Đọc hình ảnh
-image = cv2.imread('trial_lie_022_aligned/frame_det_00_000001.bmp', cv2.IMREAD_GRAYSCALE)  # Chuyển hình ảnh thành grayscale
+image = cv2.imread('landmark/trial_lie_022_aligned/frame_det_00_000001.bmp', cv2.IMREAD_GRAYSCALE)  # Chuyển hình ảnh thành grayscale
 
 # 2. Tính toán HOG
 hog_features, hog_image = hog(image,
@@ -19,7 +19,7 @@ plt.figure(figsize=(10, 5))
 plt.subplot(1, 2, 1)
 plt.title("Original Image")
 plt.imshow(image, cmap='gray')
-
+print(hog_features.shape)
 # Biểu đồ HOG
 plt.subplot(1, 2, 2)
 plt.title("HOG Visualization")

@@ -1,82 +1,149 @@
-import cv2
 import numpy as np
-import os
-from sklearn.linear_model import RANSACRegressor
+import cv2
+import matplotlib.pyplot as plt
 
-def compute_dense_optical_flow(img1, img2):
-    # Chuyển đổi sang ảnh xám
-    gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
-    gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
 
-    # Tính toán dòng quang học dày đặc
-    flow = cv2.calcOpticalFlowFarneback(gray1, gray2, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-    return flow
+def compute_lbp_pixel_value(center, neighbors):
+    """
+    Tính toán giá trị LBP cho một pixel trung tâm.
 
-def detect_dense_feature_points(image):
-    # Phát hiện điểm đặc trưng bằng cách lấy mẫu dày đặc từ lưới đa tỉ lệ
-    h, w = image.shape[:2]
-    step = 10  # Kích thước lưới
-    y, x = np.mgrid[step//2:h:step, step//2:w:step].reshape(2, -1)
-    points = np.vstack((x, y)).T
-    return points
+    Args:
+        center (int): Giá trị grayscale của pixel trung tâm.
+        neighbors (list of int): Các giá trị grayscale của các pixel lân cận.
 
-def filter_camera_motion_ransac(points, flow):
-    # Sử dụng RANSAC để loại bỏ chuyển động camera
-    valid_points = []
-    valid_trajectories = []
+    Returns:
+        int: Giá trị LBP được mã hóa dưới dạng số nguyên.
+    """
+    # Áp dụng hàm s(x) cho từng điểm lân cận
+    binary_pattern = [1 if neighbor >= center else 0 for neighbor in neighbors]
+    # Chuyển nhị phân sang số thập phân
+    return sum([val * (2 ** i) for i, val in enumerate(binary_pattern)])
 
-    for point in points:
-        x, y = point
-        dx, dy = flow[int(y), int(x)]
-        model_ransac = RANSACRegressor()
-        try:
-            model_ransac.fit([[x, y]], [[x + dx, y + dy]])
-            valid_points.append((x, y))
-            valid_trajectories.append((x + dx, y + dy))
-        except Exception as e:
-            continue
 
-    return np.array(valid_points), np.array(valid_trajectories)
+def extract_lbp_features(image, radius=1, points=8):
+    """
+    Tính toán mã LBP cho toàn bộ ảnh.
 
-def visualize_dense_optical_flow(image, points, trajectories):
-    # Vẽ các điểm đỏ và các đường trajectory
-    vis = image.copy()
-    for (x1, y1), (x2, y2) in zip(points, trajectories):
-        cv2.line(vis, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 1)  # Vẽ đường xanh lá
-        cv2.circle(vis, (int(x1), int(y1)), 4, (0, 0, 255), -1)  # Vẽ keypoint màu đỏ lớn hơn
+    Args:
+        image (numpy.ndarray): Ảnh xám đầu vào.
+        radius (int): Bán kính của vòng tròn điểm lân cận.
+        points (int): Số lượng điểm lân cận.
 
-    return vis
+    Returns:
+        numpy.ndarray: Ảnh mã hóa LBP.
+    """
+    height, width = image.shape
+    lbp_image = np.zeros_like(image, dtype=np.uint8)
 
-# Chạy trên folder ảnh
-input_folder = "landmark/trial_lie_006_aligned"  # Thay bằng đường dẫn folder chứa ảnh
-output_folder = "output_folder"  # Thư mục lưu kết quả
-os.makedirs(output_folder, exist_ok=True)
+    # Tính tọa độ lân cận trên vòng tròn
+    circle_offsets = [
+        (int(np.round(radius * np.cos(2 * np.pi * i / points))),
+         int(np.round(radius * np.sin(2 * np.pi * i / points))))
+        for i in range(points)
+    ]
 
-# Lấy danh sách các file ảnh và sắp xếp
-image_files = sorted([f for f in os.listdir(input_folder) if f.endswith(('.png', '.bmp', '.jpeg'))])
+    # Duyệt qua từng pixel trong ảnh
+    for x in range(radius, width - radius):
+        for y in range(radius, height - radius):
+            neighbors = []
+            for dx, dy in circle_offsets:
+                neighbors.append(image[y + dy, x + dx])
+            lbp_image[y, x] = compute_lbp_pixel_value(image[y, x], neighbors)
 
-for i in range(len(image_files) - 1):
-    image1_path = os.path.join(input_folder, image_files[i])
-    image2_path = os.path.join(input_folder, image_files[i + 1])
+    return lbp_image
 
-    img1 = cv2.imread(image1_path)
-    img2 = cv2.imread(image2_path)
 
-    if img1 is None or img2 is None:
-        print(f"Không thể đọc ảnh: {image1_path} hoặc {image2_path}")
-        continue
+def compute_lbp_histogram(image, num_regions=4, bins=256):
+    """
+    Chia ảnh thành các vùng nhỏ và tính histogram cho từng vùng.
 
-    # Phát hiện điểm đặc trưng dày đặc từ lưới đa tỉ lệ
-    dense_points = detect_dense_feature_points(img1)
+    Args:
+        image (numpy.ndarray): Ảnh mã hóa LBP.
+        num_regions (int): Số vùng chia trên mỗi chiều (tổng cộng là num_regions^2 vùng).
+        bins (int): Số lượng bins trong histogram.
 
-    # Tính dòng quang học
-    flow = compute_dense_optical_flow(img1, img2)
+    Returns:
+        numpy.ndarray: Vector đặc trưng LBP từ toàn bộ ảnh.
+    """
+    height, width = image.shape
+    region_height, region_width = height // num_regions, width // num_regions
+    histograms = []
 
-    # Lọc chuyển động camera bằng RANSAC
-    filtered_points, filtered_trajectories = filter_camera_motion_ransac(dense_points, flow)
+    for i in range(num_regions):
+        for j in range(num_regions):
+            # Lấy một vùng nhỏ từ ảnh
+            region = image[i * region_height:(i + 1) * region_height,
+                     j * region_width:(j + 1) * region_width]
+            # Tính histogram của vùng
+            hist, _ = np.histogram(region, bins=bins, range=(0, bins))
+            histograms.append(hist)
 
-    # Vẽ và lưu kết quả
-    result = visualize_dense_optical_flow(img1, filtered_points, filtered_trajectories)
-    output_path = os.path.join(output_folder, f"optical_flow_ransac_{i}.jpg")
-    cv2.imwrite(output_path, result)
-    print(f"Lưu kết quả: {output_path}")
+    # Ghép tất cả các histogram lại thành một vector
+    return np.concatenate(histograms)
+
+
+# Đọc ảnh và chuyển sang ảnh xám
+image_path = "landmark/trial_lie_014_aligned/frame_det_00_000082.bmp"  # Thay bằng đường dẫn ảnh
+image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+
+# Tính mã LBP
+lbp_image = extract_lbp_features(image, radius=1, points=8)
+
+# Tính vector histogram đặc trưng
+lbp_feature_vector = compute_lbp_histogram(lbp_image, num_regions=4, bins=256)
+
+# Hiển thị ảnh LBP
+plt.figure(figsize=(10, 5))
+plt.subplot(1, 2, 1)
+plt.title("Original Image")
+plt.imshow(image, cmap="gray")
+plt.subplot(1, 2, 2)
+plt.title("LBP Encoded Image")
+plt.imshow(lbp_image, cmap="gray")
+plt.show()
+
+# In kích thước của vector đặc trưng LBP
+print("LBP Feature Vector Shape:", lbp_feature_vector.shape)
+
+
+def plot_histogram(lbp_image, num_regions=4, bins=256):
+    """
+    Vẽ biểu đồ histogram của ảnh LBP, cả tổng quát và từng vùng nhỏ.
+
+    Args:
+        lbp_image (numpy.ndarray): Ảnh mã hóa LBP.
+        num_regions (int): Số vùng chia trên mỗi chiều.
+        bins (int): Số lượng bins trong histogram.
+    """
+    height, width = lbp_image.shape
+    region_height, region_width = height // num_regions, width // num_regions
+
+    # Tính histogram toàn bộ ảnh
+    total_hist, _ = np.histogram(lbp_image, bins=bins, range=(0, bins))
+
+    # Vẽ histogram tổng quát
+    plt.figure(figsize=(10, 6))
+    plt.subplot(2, 1, 1)
+    plt.title("Overall LBP Histogram")
+    plt.bar(range(bins), total_hist, color='blue', alpha=0.7)
+    plt.xlabel("LBP Value")
+    plt.ylabel("Frequency")
+
+    # Tính và vẽ histogram từng vùng
+    plt.subplot(2, 1, 2)
+    plt.title(f"LBP Histograms for {num_regions}x{num_regions} Regions")
+    for i in range(num_regions):
+        for j in range(num_regions):
+            # Lấy một vùng nhỏ
+            region = lbp_image[i * region_height:(i + 1) * region_height,
+                     j * region_width:(j + 1) * region_width]
+            # Tính histogram cho vùng
+            region_hist, _ = np.histogram(region, bins=bins, range=(0, bins))
+            # Vẽ histogram
+            plt.bar(range(bins), region_hist, alpha=0.5, label=f"Region {i},{j}")
+
+    plt.xlabel("LBP Value")
+    plt.ylabel("Frequency")
+    plt.legend(loc="upper right", fontsize='small', ncol=2)
+    plt.tight_layout()
+    plt.show()

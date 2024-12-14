@@ -34,7 +34,7 @@ def brief_descriptor(patch, keypoint, random_pairs):
     return np.array(binary_descriptor)
 
 # Load the image
-image = cv2.imread("trial_lie_022_aligned/frame_det_00_000001.bmp", cv2.IMREAD_GRAYSCALE)
+image = cv2.imread("landmark/trial_lie_022_aligned/frame_det_00_000001.bmp", cv2.IMREAD_GRAYSCALE)
 
 # Detect keypoints using FAST
 fast = cv2.FastFeatureDetector_create()
