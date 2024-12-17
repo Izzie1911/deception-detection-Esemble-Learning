@@ -1,24 +1,23 @@
 import numpy as np
 import cv2
-from skimage.feature import local_binary_pattern
 import os
-import matplotlib.pyplot as plt
-# Function to compute LBP codes
+from skimage.feature import local_binary_pattern
+
+
 def compute_lbp(image, radius=1, n_points=8):
     return local_binary_pattern(image, n_points, radius, method="uniform")
 
-# Function to extract LBP-TOP features
+
 def lbp_top(video_frames, radius=1, n_points=8):
     num_frames, height, width = video_frames.shape
 
-    # Initialize histograms for XY, XT, and YT planes
     hist_xy = np.zeros((256,), dtype=np.float32)
     hist_xt = np.zeros((256,), dtype=np.float32)
     hist_yt = np.zeros((256,), dtype=np.float32)
 
     # XY Plane
-    for frame in range(num_frames):
-        lbp_xy = compute_lbp(video_frames[frame], radius, n_points)
+    for frame_idx in range(num_frames):
+        lbp_xy = compute_lbp(video_frames[frame_idx], radius, n_points)
         hist_xy += np.histogram(lbp_xy, bins=256, range=(0, 255))[0]
 
     # XT Plane
@@ -42,27 +41,44 @@ def lbp_top(video_frames, radius=1, n_points=8):
     lbp_top_descriptor = np.concatenate([hist_xy, hist_xt, hist_yt])
     return lbp_top_descriptor
 
-# Example usage
+
 if __name__ == "__main__":
-    # Path to the directory containing frames
-    frame_directory = "landmark/trial_lie_014_aligned"
+    # Thư mục cha chứa nhiều thư mục video
+    parent_directory = "landmark/trial_lie_001_aligned"
 
-    # Load frames from directory
-    frames = []
-    for filename in sorted(os.listdir(frame_directory)):
-        if filename.endswith(".bmp") or filename.endswith(".jpg"):
-            frame_path = os.path.join(frame_directory, filename)
-            frame = cv2.imread(frame_path, cv2.IMREAD_GRAYSCALE)
-            frames.append(frame)
+    lbp_top_sum = None
+    video_count = 0
 
-    video_frames = np.array(frames)
+    # Duyệt qua mỗi thư mục con (mỗi thư mục con là một video)
+    for video_folder in os.listdir(parent_directory):
+        video_path = os.path.join(parent_directory, video_folder)
+        if os.path.isdir(video_path):
+            # Đọc tất cả frames trong thư mục video_path
+            frames = []
+            for filename in sorted(os.listdir(video_path)):
+                if filename.lower().endswith(('.bmp', '.jpg', '.png')):
+                    frame_path = os.path.join(video_path, filename)
+                    frame = cv2.imread(frame_path, cv2.IMREAD_GRAYSCALE)
+                    if frame is not None:
+                        frames.append(frame)
 
-    # Compute LBP-TOP features
-    lbp_top_features = lbp_top(video_frames)
-    print("LBP-TOP Descriptor:", lbp_top_features)
-    plt.figure(figsize=(10, 5))
-    plt.bar(range(len(lbp_top_features)), lbp_top_features, width=1.0)
-    plt.title("Concatenated LBP-TOP Descriptor Histogram")
-    plt.xlabel("LBP Code Index")
-    plt.ylabel("Frequency")
-    plt.show()
+            if len(frames) == 0:
+                continue
+
+            video_frames = np.array(frames)
+            # Tính LBP-TOP cho video này
+            lbp_top_features = lbp_top(video_frames)
+
+            # Cộng dồn vào sum
+            if lbp_top_sum is None:
+                lbp_top_sum = np.zeros_like(lbp_top_features, dtype=np.float64)
+            lbp_top_sum += lbp_top_features
+            video_count += 1
+
+    if video_count > 0:
+        avg_lbp_top = lbp_top_sum / video_count
+        print("Số lượng video:", video_count)
+        print("Kích thước vector LBP-TOP trung bình:", avg_lbp_top.shape)
+        print("Vector LBP-TOP trung bình:", avg_lbp_top)
+    else:
+        print("Không tìm thấy video hợp lệ trong thư mục.")
